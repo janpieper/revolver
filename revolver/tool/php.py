@@ -78,5 +78,7 @@ def _install_apc():
 
 
 def _install_composer():
-    # TODO Implement this
-    pass
+    url = "http://getcomposer.org/installer"
+    bin_path = run("phpenv which php")
+    path = bin_path.replace("/php", "")
+    run("curl -s %s | php -- --install-dir %s" % (url, path))

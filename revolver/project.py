@@ -128,6 +128,9 @@ class AutoDependencyHook(BaseHook):
             if file.exists("requirements.txt"):
                 self._dependencies_requirements_txt()
 
+            if file.exists("composer.json"):
+                self._depenencies_composer_json()
+
     def _dependencies_package_json(self):
         if command.exists("npm"):
             core.run("npm install")
@@ -143,3 +146,7 @@ class AutoDependencyHook(BaseHook):
     def _dependencies_requirements_txt(self):
         if command.exists("pip"):
             core.run("pip install -r requirements.txt --use-mirrors")
+
+    def _dependencies_composer_json(self):
+        if command.exists("composer.phar"):
+            core.run("composer.phar install")
