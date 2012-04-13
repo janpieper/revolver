@@ -29,8 +29,8 @@ def _install_php(version, fpm, xdebug):
         "libc-client2007e-dev", "libcurl4-gnutls-dev", "libexpat1-dev",
         "libfreetype6-dev", "libgmp3-dev", "libicu-dev", "libjpeg-dev",
         "libltdl-dev", "libmcrypt-dev", "libmhash-dev", "libpng12-dev",
-        "libreadline-dev", "libssl1.0.0", "libssl-dev", "libt1-dev",
-        "libtidy-dev", "libxml2-dev", "libxslt1-dev", "re2c", "zlib1g-dev"
+        "libreadline-dev", "libssl-dev", "libt1-dev", "libtidy-dev",
+        "libxml2-dev", "libxslt1-dev", "re2c", "zlib1g-dev"
     ])
 
     def configure(value):
