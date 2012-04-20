@@ -7,7 +7,7 @@ import posixpath
 
 from revolver import contextmanager as ctx
 from revolver import directory as dir
-from revolver import file, git, core, command
+from revolver import file, git, core, command, service
 
 
 class Deployinator(object):
@@ -20,7 +20,8 @@ class Deployinator(object):
         self._init_folders()
 
     def add_hook(self, hook):
-        self._hooks.append(hook(self))
+        hook.set_deployinator(self)
+        self._hooks.append(hook)
 
     def dispatch_hook(self, name):
         for hook in self._hooks:
@@ -29,25 +30,29 @@ class Deployinator(object):
                 method()
 
     def run(self):
+        self.dispatch_hook("init")
         self.dispatch_hook("before_layout")
         try:
             self._layout()
             self.dispatch_hook("after_layout")
 
-            self.dispatch_hook("before_upload")
-            self._upload()
-            self.dispatch_hook("after_upload")
+            with ctx.cd(self.folders["releases.current"]):
+                self.dispatch_hook("before_upload")
+                self._upload()
+                self.dispatch_hook("after_upload")
 
-            self.dispatch_hook("before_cleanup")
-            self._cleanup()
-            self.dispatch_hook("after_cleanup")
+                self.dispatch_hook("before_cleanup")
+                self._cleanup()
+                self.dispatch_hook("after_cleanup")
 
-            self.dispatch_hook("before_activate")
-            self._activate()
+                self.dispatch_hook("before_activate")
+                self._activate()
         except:
             dir.remove(self.folders["releases.current"], recursive=True)
             raise
-        self.dispatch_hook("after_activate")
+
+        with ctx.cd(self.folders["releases.current"]):
+            self.dispatch_hook("after_activate")
 
     def _init_folders(self):
         project = posixpath.join(self.cwd, self.name)
@@ -73,22 +78,20 @@ class Deployinator(object):
                 if type != "current":
                     dir.create(path, recursive=True)
             else:
-                dir.attributes(path, owner=current_user, recursive=True)
+                with ctx.sudo():
+                    dir.attributes(path, owner=current_user, recursive=True)
 
     def _upload(self):
         # TODO Warn if there are local changes
         tmp_tar = git.create_archive(self.revision)
 
         try:
-            with ctx.cd(self.folders["releases.current"]):
-                core.put(tmp_tar, "deploy.tar.gz")
-                core.run("tar -xzf deploy.tar.gz")
-                file.remove("deploy.tar.gz")
+            core.put(tmp_tar, "deploy.tar.gz")
+            core.run("tar -xzf deploy.tar.gz")
+            file.remove("deploy.tar.gz")
 
-                # TODO Fix file.write(). Sometimes the temp-file workaround of
-                #      Fabric seems to be broken. Uncomment the following line
-                #      after everything is fixed.
-                # file.write("VERSION", git.revparse(self.revision))
+            with ctx.unpatched_state():
+                file.write("VERSION", git.revparse(self.revision))
         finally:
             core.local("rm -rf %s" % tmp_tar)
 
@@ -102,13 +105,64 @@ class Deployinator(object):
 
 
 class BaseHook(object):
-    def __init__(self, deployinator):
+    def set_deployinator(self, deployinator):
         self.deployinator = deployinator
 
     def __getattr__(self, name):
         if name.startswith("on_"):
             return None
         return getattr(self.deployinator, name)
+
+
+class UnicornUpstartHook(BaseHook):
+    _template = """\
+description "Unicorn application server for {name}"
+author "Revolver UnicornUpstartHook"
+version "1.0"
+
+start on runlevel [2]
+stop  on runlevel [016]
+
+console owner
+
+exec sudo\\
+  -u {user}\\
+  -i /bin/bash -i\\
+  -c "unicorn\\
+    -E production\\
+    -c  {folders[current]}/config/unicorn.rb\\
+     >> {folders[shared.logs]}/unicorn.stdout.log\\
+    2>> {folders[shared.logs]}/unicorn.stderr.log"
+
+"""
+
+    def on_init(self):
+        self._service = "unicorn-" + self.name
+
+    def on_before_activate(self):
+        values = {
+            "folders": self.folders,
+            "name": self.name,
+            "user": core.run("echo $USER").stdout
+        }
+        content = self._template.format(**values)
+        service.add_upstart(self._service, content)
+
+    def on_after_activate(self):
+        service.restart(self._service)
+
+
+class SharedDirectoriesHook(BaseHook):
+    def __init__(self, shares):
+        self._shares = shares
+
+    def on_after_upload(self):
+        for src, dst in self._shares:
+            dst = dst % self.folders
+
+            dir.ensure(posixpath.dirname(src), recursive=True)
+            dir.ensure(dst, recursive=True)
+            file.link(dst, src)
 
 
 class AutoDependencyHook(BaseHook):
